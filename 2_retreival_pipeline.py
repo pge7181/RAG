@@ -1,52 +1,78 @@
-from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
+import os
+import torch
 from dotenv import load_dotenv
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFacePipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 load_dotenv()
 
-persistent_directory = "db/chroma_db"
+# --- 1. SETUP MODEL (Do this ONCE outside the loop) ---
+model_id = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
 
-# Loading Embeddings and Vector Store
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model_obj = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    device_map="auto",
+    torch_dtype=torch.bfloat16
+)
+
+pipe = pipeline(
+    "text-generation",
+    model=model_obj,
+    tokenizer=tokenizer,
+    max_new_tokens=256,
+    temperature=0.1,
+    do_sample=True,
+    model_kwargs={"attn_implementation": "eager"} 
+)
+
+model = HuggingFacePipeline(pipeline=pipe)
+
+# --- 2. SETUP RETRIEVER ---
+persistent_directory = "db/chroma_db"
 embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 db = Chroma(
     persist_directory=persistent_directory,
-    embedding_function=embedding_model,
-    collection_metadata={"hnsw:space":"cosine"}
+    embedding_function=embedding_model
 )
-
-# search for relevant documents
-# query="Which island does SpaceX lease for its launches in the Pacific?"
+retriever = db.as_retriever(search_kwargs={"k": 5})
 
 queries = [
-    "Which island does SpaceX lease for its launches in the Pacific?",
-    "What was NVIDIA's first graphics accelerator called?",
     "What was Microsoft's first hardware product release?",
-    "How much did microsoft pay to acquire Github?",
-    "In what year did Tesla begin production of the Roadster?",
-    "Who succeeded Ze'ev Drori as CEO in October 2008",
-    "Which island does SapceX lease for its launches in the Pacific?",
-    "What was the original name of Microsoft before it became Microsoft?"
+    "In what year did Tesla begin production of the Roadster?"
 ]
 
-retriever = db.as_retriever(search_kwargs={"k":5})
-
-# retriever = db.as_retriever(
-#     search_type="similarity_score_threshold",
-#     search_kwargs={
-#         "k": 5,
-#         "score_threshold": 0.3 # only return chunks with cosine similarity >=0.3
-#     }
-# )
-
-
+# --- 3. RUN PIPELINE ---
 for query in queries:
+    # Get relevant docs
     relevant_docs = retriever.invoke(query)
+    context = "\n".join([f"- {doc.page_content}" for doc in relevant_docs])
+    
+    # Format prompt using the specific SmolLM2 tags
+    formatted_prompt = f"""<|im_start|>system
+You are a helpful assistant who answers questions based ONLY on provided documents.<|im_end|>
+<|im_start|>user
+Question: {query}
 
-    print(f"User Query: {query}")
-    # Display Results
+Documents:
+{context}
 
-    print("----Context----")
-    for i, doc in enumerate(relevant_docs, 1):
-        print(f"Document {i}:\n{doc.page_content}\n")
+Answer:<|im_end|>
+<|im_start|>assistant
+"""
+
+    # Generate response
+    raw_result = model.invoke(formatted_prompt)
+
+    # Clean the output (isolate the assistant's part)
+    if "<|im_start|>assistant" in raw_result:
+        answer = raw_result.split("<|im_start|>assistant")[-1].strip()
+    else:
+        answer = raw_result.strip()
+
+    print(f"\nUser Query: {query}")
+    print("-------------Generated Response-----------------")
+    print(answer)
+    print("-" * 50)
