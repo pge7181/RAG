@@ -1,13 +1,12 @@
-import os
-from langchain_community.document_loaders import TextLoader, DirectoryLoader
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
-from dotenv import load_dotenv
+import os # Standard python library to interact with your operating system (file paths etc.)
+from langchain_community.document_loaders import TextLoader, DirectoryLoader # Loads text files from your disks
+from langchain_text_splitters import CharacterTextSplitter # Breaks long texts into smaller manageable chunks
+from langchain_chroma import Chroma # Main interface for interacting with ChromaDB
+from langchain_huggingface import HuggingFaceEmbeddings # Tools to convert text to vectors locally
+from langchain_community.vectorstores import Chroma # Specific version import for chormaDB
+from dotenv import load_dotenv # loads your environment variables like API_KEYS
 
-load_dotenv()
+load_dotenv() # reads the .env file and sets variable in the environment
 
 def load_documents(docs_path="docs"):
     """Load all the text files from the repository"""
@@ -22,14 +21,15 @@ def load_documents(docs_path="docs"):
     loader = DirectoryLoader(
         path=docs_path,
         glob="*.txt",
-        loader_cls=TextLoader
+        loader_cls=TextLoader # Tells langchain how to parse each file found
     )
 
-    documents = loader.load()
+    documents = loader.load() # Reads the files into memory as Document objects
 
     if len(documents) == 0:
         raise FileNotFoundError(f"No .txt files found in {docs_path}. Please add your company documents.")
     
+    # Debug print: shows the first two documents to confirm successful ingestion
     for i, doc in enumerate(documents[:2]):
         print(f"\n Document: {i+1}")
         print(f"   Source: {doc.metadata['source']}")
@@ -44,12 +44,13 @@ def split_documents(documents, chunk_size=1000, chunk_overlap=0):
     """Splitting documents into smaller chunks overlap"""
     print("Splitting documents into chunks...")
 
+    # Character splitter, based docs based on characters (Default it \n\n)
     text_splitter = CharacterTextSplitter(
-        chunk_size = chunk_size,
-        chunk_overlap = chunk_overlap
+        chunk_size = chunk_size, # Maxlength of each chunk (tokens/chars)
+        chunk_overlap = chunk_overlap # Amount of context shared between chunks to keep continuity
     )
 
-    chunks = text_splitter.split_documents(documents)
+    chunks = text_splitter.split_documents(documents) # Perform the split
 
     if chunks:
 
